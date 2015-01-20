@@ -1,0 +1,453 @@
+<?php
+/**
+ * @file
+ * Aoeu.
+ */
+
+/**
+ * Implements hook_init().
+ */
+function media_23video_auth_init() {
+  global $base_url;
+  static $included;
+  if (isset($included)) {
+    return;
+  }
+
+  $service_url = variable_get('media23video_service_site_url', '');
+  if (!empty($service_url)) {
+    //drupal_add_http_header('Access-Control-Allow-Origin', '*'); //$service_url);
+  }
+  $included = TRUE;
+  $ini_path = explode(PATH_SEPARATOR, ini_get("include_path"));
+  $ini_path[] = drupal_get_path("module", "media_23video_auth") . '/libraries';
+  $ini_path = implode(PATH_SEPARATOR, $ini_path);
+  ini_set("include_path", $ini_path);
+  require_once "HTTP/OAuth/Consumer.php";
+  require_once "HTTP/OAuth.php";
+  require_once "HTTP/OAuth/Consumer/Request.php";
+  require_once "HTTP/Request2.php";
+  require_once "Connector23Video.php";
+}
+
+/**
+ * Implements hook_menu().
+ */
+function media_23video_auth_menu() {
+  $items = array();
+
+  $items['admin/config/media/media_23video'] = array(
+    'title' => 'Media 23Video settings',
+    'type' => MENU_NORMAL_ITEM,
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('media_23video_auth_admin_form'),
+    'access arguments' => array('administer media_23video'),
+  );
+
+  $items['media-23video-callback'] = array(
+    'title' => 'Media 23Video Callback',
+    'description' => 'Callback for uploading videos to 23Video',
+    'page callback' => 'media_23video_auth_callback',
+    'access arguments' => array('access media_23video'),
+  );
+
+  $items['media-23video-uploadtoken'] = array(
+    'title' => 'Media 23Video get upload token',
+    'description' => 'Callback for fetching upload token from 23Video server',
+    'page callback' => 'media_23video_auth_uploadtoken_callback',
+    'access arguments' => array('access media_23video'),
+  );
+
+  return $items;
+}
+
+/**
+ * Implement hook_permission().
+ */
+function media_23video_auth_permission() {
+  return array(
+    'administer media_23video_auth' => array(
+      'title' => t('administer media_23video_auth'),
+      'description' => t('administer media_23video_auth'),
+      'restrict access' => TRUE,
+    ),
+    'access media_23video' => array(
+      'title' => t('access media_23video'),
+      'description' => t('Access to view videos from 23Video'),
+      'restrict access' => TRUE,
+    ),
+  );
+}
+
+/**
+ * Implements hook_media_internet_providers().
+ */
+function media_23video_auth_media_internet_providers() {
+  $info['MediaInternet23VideoAuthHandler'] = array(
+    'title' => t('23VideoAuth'),
+  );
+
+  return $info;
+}
+
+/**
+ * Implements hook_file_mimetype_mapping_alter().
+ *
+ * Regster the video/23video mimetype.
+ */
+function media_23video_auth_file_mimetype_mapping_alter(&$mapping) {
+  $mapping['mimetypes'][] = 'video/23video-auth';
+}
+
+/**
+ * Implements hook_ctools_plugin_api().
+ */
+function media_23video_auth_ctools_plugin_api($owner, $api) {
+  static $api_versions = array(
+    'file_entity' => array(
+      'file_default_displays' => 1,
+    ),
+  );
+  if (isset($api_versions[$owner][$api])) {
+    return array('version' => $api_versions[$owner][$api]);
+  }
+}
+
+/**
+ * Implements hook_stream_wrappers().
+ */
+function media_23video_auth_stream_wrappers() {
+  return array(
+    '23video-auth' => array(
+      'name' => t('23Video'),
+      'class' => 'Media23VideoAuthStreamWrapper',
+      'description' => t('Videos provided by 23Video.'),
+      'type' => STREAM_WRAPPERS_READ_VISIBLE,
+    ),
+  );
+}
+
+/**
+ * Implements hook_file_formatter_info().
+ */
+function media_23video_auth_file_formatter_info() {
+  $formatters['media_23video_auth_video'] = array(
+    'label' => t('23Video'),
+    'file types' => array('video'),
+    'default settings' => array(
+      'width' => 480,
+      'height' => 270,
+      'autoplay' => 0,
+    ),
+    'view callback' => 'media_23video_auth_file_formatter_video_view',
+    'settings callback' => 'media_23video_auth_file_formatter_video_settings',
+  );
+
+  $formatters['media_23video_auth_image'] = array(
+    'label' => t('23Video Preview Image'),
+    'file types' => array('video'),
+    'default settings' => array(
+      'image_style' => '',
+    ),
+    'view callback' => 'media_23video_auth_file_formatter_image_view',
+    'settings callback' => 'media_23video_auth_file_formatter_image_settings',
+  );
+  return $formatters;
+}
+
+/**
+ * Implements hook_file_formatter_FORMATTER_view().
+ */
+function media_23video_auth_file_formatter_video_view($file, $display, $langcode) {
+  $scheme = file_uri_scheme($file->uri);
+  if ($scheme != '23video-auth') {
+    return;
+  }
+
+  $uri_target = file_uri_target($file->uri);
+  $video_id = arg(1, $uri_target);
+  $source = arg(3, $uri_target);
+
+  $video_handler = new MediaInternet23VideoAuthHandler("http://{$source}/video/{$video_id}");
+  $settings = array(
+    'maxheight' => isset($file->override['height']) ? $file->override['height'] : $display['settings']['height'],
+    'maxwidth' => isset($file->override['width']) ? $file->override['width'] : $display['settings']['width'],
+    'autoplay' => isset($file->override['autoplay']) ? $file->override['autoplay'] : $display['settings']['autoplay'],
+  );
+
+  $info = $video_handler->getOEmbed($settings);
+  if (empty($info)) {
+    return;
+  }
+
+  $element = array(
+    '#markup' => $info['html'],
+  );
+  return $element;
+}
+
+/**
+ * Implements hook_file_formatter_FORMATTER_settings().
+ */
+function media_23video_auth_file_formatter_video_settings($form, &$form_state, $settings) {
+  $element = array();
+
+  $element['width'] = array(
+    '#title' => t('Width'),
+    '#type' => 'textfield',
+    '#default_value' => $settings['width'],
+  );
+  $element['height'] = array(
+    '#title' => t('Height'),
+    '#type' => 'textfield',
+    '#default_value' => $settings['height'],
+  );
+
+  $element['autoplay'] = array(
+    '#title' => t('Autoplay'),
+    '#type' => 'checkbox',
+    '#default_value' => $settings['autoplay'],
+  );
+  return $element;
+}
+
+/**
+ * Implements hook_file_formatter_FORMATTER_view().
+ */
+function media_23video_auth_file_formatter_image_view($file, $display, $langcode) {
+  $scheme = file_uri_scheme($file->uri);
+  if ($scheme == '23video-auth') {
+    $wrapper = file_stream_wrapper_get_instance_by_uri($file->uri);
+    $image_style = $display['settings']['image_style'];
+    $valid_image_styles = image_style_options(FALSE);
+
+    if (empty($image_style) || !isset($valid_image_styles[$image_style])) {
+      $element = array(
+        '#theme' => 'image',
+        '#path' => $wrapper->getOriginalThumbnailPath(),
+        '#alt' => isset($file->override['attributes']['alt']) ? $file->override['attributes']['alt'] : $file->filename,
+      );
+    }
+    else {
+      $element = array(
+        '#theme' => 'image_style',
+        '#style_name' => $image_style,
+        '#path' => $wrapper->getLocalThumbnailPath(),
+        '#alt' => isset($file->override['attributes']['alt']) ? $file->override['attributes']['alt'] : $file->filename,
+      );
+    }
+
+    return $element;
+  }
+}
+
+/**
+ * Implements hook_file_formatter_FORMATTER_settings().
+ */
+function media_23video_auth_file_formatter_image_settings($form, &$form_state, $settings) {
+  $element = array();
+  $element['image_style'] = array(
+    '#title' => t('Image style'),
+    '#type' => 'select',
+    '#options' => image_style_options(FALSE),
+    '#default_value' => $settings['image_style'],
+    '#empty_option' => t('None (original image)'),
+  );
+  return $element;
+}
+
+/**
+ * Implements hook_media_parse().
+ *
+ * @todo This hook should be deprecated. Refactor Media module to not call it
+ *   any more, since media_internet should be able to automatically route to the
+ *   appropriate handler.
+ */
+function media_23video_auth_media_parse($embed_code) {
+  $handler = new MediaInternet23VideoAuthHandler($embed_code);
+  return $handler->parse($embed_code);
+}
+
+/**
+ * Admin settings form.
+ */
+function media_23video_auth_admin_form($form, &$form_state) {
+  $form[] = array();
+
+  $form['media23video_service_site_url'] = array(
+    '#type' => 'textfield',
+    '#title' => t('23 Video site URL'),
+    '#description' => t('URL to your 23 Video site, e.g. http://example.23video.com/'),
+    '#required' => TRUE,
+    '#default_value' => variable_get('media23video_service_site_url', 'http://example.23video.com'),
+  );
+
+  $form['media23video_service_api_key_public'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Consumer pulic Key'),
+    '#description' => t('To work with 23 Video, Drupal needs the application consumer key.'),
+    '#required' => TRUE,
+    '#default_value' => variable_get('media23video_service_api_key_public', ''),
+  );
+
+  $form['media23video_service_api_key_secret'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Secret Key'),
+    '#description' => t('To work with 23 Video, Drupal needs the application secret key.'),
+    '#required' => TRUE,
+    '#default_value' => variable_get('media23video_service_api_key_secret', ''),
+  );
+  $form['media23video_service_api_access_token'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Access token'),
+    '#required' => TRUE,
+    '#default_value' => variable_get('media23video_service_api_access_token', ''),
+  );
+
+  $form['media23video_service_api_access_token_secret'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Access token secret'),
+    '#required' => TRUE,
+    '#default_value' => variable_get('media23video_service_api_access_token_secret', ''),
+  );
+
+  $form['media23video_service_api_url'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Api url'),
+    '#description' => t('Api url. Exmple http://api.visualplatform.net/oauth/'),
+    '#required' => TRUE,
+    '#default_value' => variable_get('media23video_service_api_url', 'http://api.visualplatform.net/oauth/'),
+  );
+
+  return system_settings_form($form);
+}
+
+function media_23video_auth_media_browser_plugin_info() {
+  $info['23video-auth'] = array(
+    'title' => t('23Video'),
+    'class' => 'Media23VideoAuthBrowser',
+  );
+
+  return $info;
+}
+
+/**
+ * 23Video upload form.
+ */
+function media_23video_auth_upload($form, &$form_state) {
+  global $base_url;
+  drupal_add_http_header('Access-Control-Allow-Origin', '*'); //$service_url);
+
+  $service_url = variable_get('media23video_service_site_url', '');
+
+  $form['#action'] = $service_url . '/api/photo/redeem-upload-token';
+
+  $form['title'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Title'),
+  );
+
+  $form['description'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Description'),
+  );
+
+  $form['upload_file'] = array(
+    '#type' => 'file',
+    '#name' => 'file',
+    '#title' => t('Choose a file'),
+    '#theme_wrappers' => array(),
+  );
+
+  $form['upload_token'] = array(
+    '#type' => 'hidden',
+    '#value' => '',
+  );
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Send'),
+    '#attached' => array(
+      'js' => array(
+        drupal_get_path('module', 'media_23video_auth') . '/js/async_upload.js',
+        'misc/jquery.form.js',
+      ),
+    ),
+  );
+
+  return $form;
+}
+
+/**
+ * Form for submitting photo_id after successful upload.
+ */
+function media_23video_auth_attach($form, &$form_state) {
+  $form['attach'] = array(
+    '#type' => 'fieldset',
+    '#prefix' => '<div style="visibility: hidden">',
+    '#suffix' => '</div>',
+  );
+
+  $form['attach']['photo_id'] = array(
+    '#type' => 'hidden',
+    '#value' => 0,
+  );
+
+  $form['attach']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => 'attach',
+  );
+
+  return $form;
+}
+
+/**
+ * Submit form for submitting photo_id.
+ */
+function media_23video_auth_attach_submit($form, &$form_state) {
+  if (isset($form_state['input']['photo_id']) && $form_state['input']['photo_id']) {
+    $uri = '23video-auth://v/' . variable_get('media23video_service_site_url') . '/' . intval($form_state['input']['photo_id']);
+    $file = file_uri_to_object($uri);
+    $file->type = 'video';
+    if (!isset($file->fid)) {
+      $file->fid = 0;
+    }
+
+    try {
+      file_save($file);
+      $form_state['file'] = $file;
+    }
+    catch (Exception $e) {
+      drupal_set_message(t("Couldn't save file"), 'error');
+    }
+  }
+}
+
+/**
+ * Callback function after uploading files to 23Video.
+ */
+function media_23video_auth_callback() {
+  $params = drupal_get_query_parameters();
+
+  print drupal_json_encode($params);
+  drupal_exit();
+}
+
+function media_23video_auth_uploadtoken_callback() {
+  global $base_url;
+
+  $params = drupal_get_query_parameters();
+  $title = isset($params['title']) ? $params['title'] : '';
+  $description = isset($params['description']) ? $params['description'] : '';
+
+  $consumer = Connector23Video::getInstance();
+  $upload_token = $consumer->doGetUploadToken($title, $description, $base_url . '/media-23video-callback');
+  $params = array(
+    'title' => $title,
+    'description' => $description,
+    'upload_token' => $upload_token,
+  );
+
+  print drupal_json_encode($params);
+  drupal_exit();
+}

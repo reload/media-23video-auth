@@ -1,0 +1,14 @@
+name = Media 23Video Auth
+description = Media 23Video with authentication
+package = 23Video Auth
+version = 7.x-0.1
+core = 7.x
+
+files[] = media_23video_auth.module
+files[] = includes/MediaInternet23VideoAuthHandler.inc
+files[] = includes/Media23VideoAuthStreamWrapper.inc
+files[] = includes/Media23VideoAuthBrowser.inc
+files[] = js/async_upload.js
+
+dependencies[] = media
+dependencies[] = media_internet
