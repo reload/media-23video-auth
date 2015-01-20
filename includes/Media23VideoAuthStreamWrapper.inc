@@ -17,7 +17,7 @@ class Media23VideoAuthStreamWrapper extends MediaReadOnlyStreamWrapper {
    */
   public function interpolateUrl() {
     if ($parameters = $this->get_parameters()) {
-      return "http://{$parameters['s']}/v.ihtml?source=share&photo_id={$parameters['v']}&autoPlay=0";
+      return "https://{$parameters['s']}/v.ihtml/player.html?source=share&photo_id={$parameters['v']}&autoPlay=0";
     }
   }
 
@@ -37,6 +37,7 @@ class Media23VideoAuthStreamWrapper extends MediaReadOnlyStreamWrapper {
    * Returns original thumbnail.
    */
   public function getOriginalThumbnailPath() {
+    return 'http://placekitten.com/g/320/200';
     if ($parameters = $this->get_parameters()) {
       $video_handler = new MediaInternet23VideoHandler("http://{$parameters['s']}/video/{$parameters['v']}");
       $info = $video_handler->getOEmbed();
@@ -58,16 +59,18 @@ class Media23VideoAuthStreamWrapper extends MediaReadOnlyStreamWrapper {
     $local_path = 'public://media-23video-auth/' . check_plain($parts['v']) . '.jpg';
     if (!file_exists($local_path)) {
       $local_path = 'public://media-23video-auth/' . check_plain($parts['v']) . '.jpg';
-      /*$dirname = drupal_dirname($local_path);
+      $dirname = drupal_dirname($local_path);
       file_prepare_directory($dirname, FILE_CREATE_DIRECTORY | FILE_MODIFY_PERMISSIONS);
-      $response = drupal_http_request($this->getOriginalThumbnailPath());
+      //$response = drupal_http_request($this->getOriginalThumbnailPath());
+      $response = drupal_http_request('http://placekitten.com/g/200/200');
       if (!isset($response->error)) {
         file_unmanaged_save_data($response->data, $local_path, TRUE);
       }
       else {
         @copy($this->getOriginalThumbnailPath(), $local_path);
-      }*/
+      }
     }
+
     return $local_path;
   }
 }
