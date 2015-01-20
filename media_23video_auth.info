@@ -9,6 +9,8 @@ files[] = includes/MediaInternet23VideoAuthHandler.inc
 files[] = includes/Media23VideoAuthStreamWrapper.inc
 files[] = includes/Media23VideoAuthBrowser.inc
 files[] = js/async_upload.js
+files[] = themes/media_23video_auth.theme.inc
+files[] = themes/media-23video-auth.tpl.php
 
 dependencies[] = media
 dependencies[] = media_internet
