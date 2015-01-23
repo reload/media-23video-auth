@@ -34,8 +34,10 @@ class Media23VideoAuthBrowser extends MediaBrowserPlugin {
   public function view() {
     // Check if the user is able to add remote media.
     if (user_access('add media from remote sources')) {
-      $build['form'] = drupal_get_form('media_23video_auth_upload', $this->params['types'], $this->params['multiselect']);
-      $build['form2'] = drupal_get_form('media_23video_auth_attach', $this->params['types'], $this->params['multiselect']);
+      // Upload form.
+      $build['upload_form'] = drupal_get_form('media_23video_auth_upload', $this->params['types'], $this->params['multiselect']);
+      // Form to attach uploaded file to content.
+      $build['attach_form'] = drupal_get_form('media_23video_auth_attach', $this->params['types'], $this->params['multiselect']);
       return $build;
     }
   }
